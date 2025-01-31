@@ -1,105 +1,131 @@
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+let scene, camera, renderer, clock;
+let physicsWorld, rigidBodies = [];
+let player;
 
-// Set canvas dimensions
-canvas.width = 800;
-canvas.height = 600;
-
-// Player object
-const player = {
-    x: 50,
-    y: 300,
-    width: 50,
-    height: 50,
-    color: 'blue',
-    speed: 5,
-    dx: 0,
-    dy: 0
-};
-
-// Opponent object
-const opponent = {
-    x: 700,
-    y: 300,
-    width: 50,
-    height: 50,
-    color: 'red',
-    speed: 5,
-    dx: 0,
-    dy: 0
-};
-
-// Draw player
-function drawPlayer() {
-    ctx.fillStyle = player.color;
-    ctx.fillRect(player.x, player.y, player.width, player.height);
-}
-
-// Draw opponent
-function drawOpponent() {
-    ctx.fillStyle = opponent.color;
-    ctx.fillRect(opponent.x, opponent.y, opponent.width, opponent.height);
-}
-
-// Clear canvas
-function clearCanvas() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-// Move player
-function movePlayer() {
-    player.x += player.dx;
-    player.y += player.dy;
-
-    // Prevent player from going out of bounds
-    if (player.x < 0) player.x = 0;
-    if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-    if (player.y < 0) player.y = 0;
-    if (player.y + player.height > canvas.height) player.y = canvas.height - player.height;
-}
-
-// Move opponent
-function moveOpponent() {
-    opponent.x += opponent.dx;
-    opponent.y += opponent.dy;
-
-    // Prevent opponent from going out of bounds
-    if (opponent.x < 0) opponent.x = 0;
-    if (opponent.x + opponent.width > canvas.width) opponent.x = canvas.width - opponent.width;
-    if (opponent.y < 0) opponent.y = 0;
-    if (opponent.y + opponent.height > canvas.height) opponent.y = canvas.height - opponent.height;
-}
-
-// Update game state
-function update() {
-    clearCanvas();
-    drawPlayer();
-    drawOpponent();
-    movePlayer();
-    moveOpponent();
-    requestAnimationFrame(update);
-}
-
-// Event listeners for player controls
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight') player.dx = player.speed;
-    if (e.key === 'ArrowLeft') player.dx = -player.speed;
-    if (e.key === 'ArrowUp') player.dy = -player.speed;
-    if (e.key === 'ArrowDown') player.dy = player.speed;
-
-    if (e.key === 'd') opponent.dx = opponent.speed;
-    if (e.key === 'a') opponent.dx = -opponent.speed;
-    if (e.key === 'w') opponent.dy = -opponent.speed;
-    if (e.key === 's') opponent.dy = opponent.speed;
+Ammo().then(() => {
+    init();
+    animate();
 });
 
-document.addEventListener('keyup', (e) => {
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') player.dx = 0;
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') player.dy = 0;
+function init() {
+    const container = document.getElementById('game-container');
 
-    if (e.key === 'd' || e.key === 'a') opponent.dx = 0;
-    if (e.key === 'w' || e.key === 's') opponent.dy = 0;
-});
+    // Initialize Three.js scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xbfd1e5);
 
-// Start the game
-update();
+    // Initialize camera
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.8, 5);
+
+    // Initialize renderer
+    renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    container.appendChild(renderer.domElement);
+
+    // Initialize clock
+    clock = new THREE.Clock();
+
+    // Initialize Ammo.js physics world
+    let collisionConfiguration = new Ammo.btDefaultCollisionConfiguration();
+    let dispatcher = new Ammo.btCollisionDispatcher(collisionConfiguration);
+    let overlappingPairCache = new Ammo.btDbvtBroadphase();
+    let solver = new Ammo.btSequentialImpulseConstraintSolver();
+    physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
+    physicsWorld.setGravity(new Ammo.btVector3(0, -9.8, 0));
+
+    // Add ground
+    createGround();
+
+    // Add player character
+    createPlayer();
+
+    // Handle window resize
+    window.addEventListener('resize', onWindowResize, false);
+}
+
+function createGround() {
+    let pos = {x: 0, y: -0.5, z: 0};
+    let scale = {x: 50, y: 1, z: 50};
+    let quat = {x: 0, y: 0, z: 0, w: 1};
+    let mass = 0;
+
+    let ground = createBox(pos, scale, quat, mass, new THREE.MeshPhongMaterial({color: 0x878787}));
+    ground.receiveShadow = true;
+}
+
+function createPlayer() {
+    let pos = {x: 0, y: 5, z: 0};
+    let scale = {x: 1, y: 2, z: 1};
+    let quat = {x: 0, y: 0, z: 0, w: 1};
+    let mass = 1;
+
+    player = createBox(pos, scale, quat, mass, new THREE.MeshPhongMaterial({color: 0x0000ff}));
+    player.castShadow = true;
+    player.position.y = 1;
+}
+
+function createBox(pos, scale, quat, mass, material) {
+    let boxGeometry = new THREE.BoxGeometry();
+    let boxMesh = new THREE.Mesh(boxGeometry, material);
+    boxMesh.position.set(pos.x, pos.y, pos.z);
+    boxMesh.scale.set(scale.x, scale.y, scale.z);
+    boxMesh.quaternion.set(quat.x, quat.y, quat.z, quat.w);
+    scene.add(boxMesh);
+
+    let transform = new Ammo.btTransform();
+    transform.setIdentity();
+    transform.setOrigin(new Ammo.btVector3(pos.x, pos.y, pos.z));
+    transform.setRotation(new Ammo.btQuaternion(quat.x, quat.y, quat.z, quat.w));
+    let motionState = new Ammo.btDefaultMotionState(transform);
+
+    let colShape = new Ammo.btBoxShape(new Ammo.btVector3(scale.x * 0.5, scale.y * 0.5, scale.z * 0.5));
+    colShape.setMargin(0.05);
+
+    let localInertia = new Ammo.btVector3(0, 0, 0);
+    if (mass !== 0) {
+        colShape.calculateLocalInertia(mass, localInertia);
+    }
+
+    let rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, colShape, localInertia);
+    let rigidBody = new Ammo.btRigidBody(rbInfo);
+
+    physicsWorld.addRigidBody(rigidBody);
+
+    boxMesh.userData.physicsBody = rigidBody;
+    rigidBodies.push(boxMesh);
+
+    return boxMesh;
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    let deltaTime = clock.getDelta();
+    updatePhysics(deltaTime);
+    renderer.render(scene, camera);
+}
+
+function updatePhysics(deltaTime) {
+    physicsWorld.stepSimulation(deltaTime, 10);
+
+    for (let i = 0; i < rigidBodies.length; i++) {
+        let objThree = rigidBodies[i];
+        let objAmmo = objThree.userData.physicsBody;
+        let ms = objAmmo.getMotionState();
+        if (ms) {
+            ms.getWorldTransform(tmpTrans);
+            let p = tmpTrans.getOrigin();
+            let q = tmpTrans.getRotation();
+            objThree.position.set(p.x(), p.y(), p.z());
+            objThree.quaternion.set(q.x(), q.y(), q.z(), q.w());
+        }
+    }
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+let tmpTrans = new Ammo.btTransform();
